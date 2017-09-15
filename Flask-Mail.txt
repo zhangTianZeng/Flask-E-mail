@@ -1,0 +1,121 @@
+#coding:utf-8
+from flask import Flask,render_template,session,redirect,url_for
+from flask_moment import Moment
+from flask_bootstrap import Bootstrap
+from flask_wtf import FlaskForm
+from wtforms import StringField,SubmitField
+from wtforms.validators import DataRequired,length
+from flask_mail import Mail,Message#导入flask包装的邮箱框架
+from threading import Thread#导入线程类
+from flask_sqlalchemy import SQLAlchemy
+
+#导入SQLAlchemy用于产生数据库对象db
+import os
+import sys
+sys.setrecursionlimit(1000)
+app =Flask(__name__)
+# m =Mail(app)
+# moment =Moment(app)
+# bootstrap =Bootstrap(app)
+app.config["SECRET_KEY"]="hard this key"
+
+app.config['MAIL_SERVER'] = 'smtp.163.com'
+app.config['MAIL_PORT'] = 25
+app.config['MAIL_USE_TLS'] = True
+
+# app.config["MAIL_USE_SSL"] = True
+app.config['MAIL_USERNAME'] = "xxx@163.com"
+app.config['MAIL_PASSWORD'] = "xxxxxxxx"
+
+base_path =os.path.abspath(os.path.dirname("f:"))
+app.config['SQLALCHEMY_DATABASE_URI'] ="sqlite:///"+os.path.join(base_path,"data.sqlite")
+#配置路径
+app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = True
+#执行结束自动提交数据库的变动
+app.config['SQLALCHEMY_TRACK_ODIFICATIONS']=True
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = True
+#解决警告问题
+db = SQLAlchemy(app)
+#创建一个SQLAlchemy实例
+m =Mail(app)
+moment =Moment(app)
+bootstrap =Bootstrap(app)
+print 'sqlite:///'+os.path.join(base_path,'data.sqlite')
+
+class Role(db.Model):# 数据库模型和表单类似，都是衍生类
+    __tablename__ = 'roles'
+    id = db.Column(db.Integer,primary_key=True)
+    name = db.Column(db.String(64),unique=True)
+    users = db.relationship('User', backref='role')
+    # 定义一个关系，注意第一个参数是类名，第二个参数是反向引用
+    def __repr__(self):
+        return '<Role %r>' % self.name
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer,primary_key=True)
+    username = db.Column(db.String(64),unique=True,index=True)
+    password = db.Column(db.String(64))
+    role_id = db.Column(db.Integer, db.ForeignKey('roles.id'))  # 外键的参数不是类名，而是表名
+    def __repr__(self):
+        return '<User %r>' % self.username
+db.drop_all()
+db.create_all()
+
+class NameForm(FlaskForm):
+    name =StringField("input your name",validators=[DataRequired(),length(1,20)])
+    submit=SubmitField("submit")
+
+def asyncSendMail(app,msg):
+    # 使用app.app_context()人工创建程序上下文
+    with app.app_context():
+    # 使用Mail发送消息
+        m.send(msg)
+
+def sendMail(to,subject,template,**kwargs):
+    '''
+    发送邮件
+    :param to: 收信人地址
+    :param subject: 主题
+    :param template: 邮件内容的模板
+    :param kwargs: 邮件内容的模板的参数
+    :return:
+    '''
+    msg = Message(
+        subject=subject,
+        sender="xxx@163.com",
+        recipients=[to]
+    )
+    # 下面两个都是邮件正文
+    msg.body = render_template(template + '.txt', **kwargs)
+    msg.html = render_template(template + '.html', **kwargs)
+    thr = Thread(target=asyncSendMail, args=(app, msg))
+    thr.start()
+    return thr
+
+
+@app.route("/")
+def index():
+    return "Hello"
+
+@app.route('/mail/',methods=['GET','POST'])
+def mail():
+    form = NameForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.name.data).first()
+        if user is None:
+            user = User(username=form.name.data)
+            db.session.add(user)
+            session['know'] = False
+            print user
+            sendMail("xxx@163.com",'New User','mail/new_user',user=user)
+        else:
+            session['know']= True
+        session['name']=form.name.data
+        return redirect(url_for('index'))
+    return render_template('sql.html',form=form,
+                           name=session.get('name'),
+                           know=session.get('know',False))
+
+
+if __name__=="__main__":
+    app.run()
